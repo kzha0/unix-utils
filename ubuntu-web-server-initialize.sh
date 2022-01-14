@@ -11,37 +11,40 @@
 
 # color codes
 
-# utility function yes/no selector
+# UTILITY FUNCTIONS
+# 1: Prompt string (default=true)
 function ynPrompt () {
-    ynOut=""
     local ynRes
     printf "\n"
     read -p "$1 (y/n?) (default: y) -> " -n 1 ynRes
-    if [[ $ynRes = "y" ]] || [[ $ynRes = "Y" ]]; then
-        ynOut="true"
+    if [[ $ynRes = "y" || $ynRes = "Y" ]]; then
         return 0
-    elif [[ $ynRes = "n" ]] || [[ $ynRes = "N" ]]; then
-        ynOut="false"
-        return 0
+    elif [[ $ynRes = "n" || $ynRes = "N" ]]; then
+        return 1
     elif [[ $ynRes = "" ]]; then
-        ynOut="true"
+        printf "\033[2K\033[1A"
+        printf "$1 (y/n?) (default: y) -> y"
+        return 0
     else
         printf "\nunknown response"
-        return 1
+        return 2
     fi
 }
 
+# 1: Max choices (default=1), 2: Prompt string
 function varPrompt () {
     varOut=""
     local varRes
     printf "$2"
     printf "\n"
     read -p "(1-$1) (default: 1) -> " -n 1 varRes
-    if [[ $varRes -gt 0 ]] && [[ $varRes -lt $(($1+1)) ]]; then
+    if [[ $varRes -gt 0 && $varRes -lt $(($1+1)) ]]; then
         varOut=$varRes
     elif [[ $varRes = "" ]]; then
+        printf "\033[2K\033[1A"
+        printf "(1-$1) (default: 1) -> 1"
         varOut=1 
-    elif [[ $varRes -lt 1 ]] || [[ $varRes -gt $1 ]]; then
+    elif [[ $varRes -lt 1 || $varRes -gt $1 ]]; then
         printf "\nunknown response"
         return 1
     else
@@ -49,7 +52,8 @@ function varPrompt () {
         return 3
     fi
 }
-# pass empty string to argument 2 for forced prompt
+
+# 1: Prompt string, 2: Default value (empty=forced)
 function stringPrompt () {
     stringOut=""
     while [[ $stringOut = "" ]]; do
@@ -64,6 +68,8 @@ function stringPrompt () {
         
         # default value selector
         if [[ $2 != "" ]] && [[ $stringRes = "" ]]; then
+            printf "\033[2K\033[1A"
+            printf "$1 (default: $2) -> $2"
             stringOut=$2
         elif [[ $2 != "" ]] && [[ $stringRes != "" ]]; then
             stringOut=$stringRes
@@ -75,174 +81,236 @@ function stringPrompt () {
         fi
     done
 }
-# pass "forced" to argument 2 for forced prompt
-function passPrompt () {
-    passOut=""
-    local passLoop="true" passRes1 passRes2
-    while [[ $passLoop = "true" ]]; do
-        # variabe message prompt on default value
-        if [[ $2 != "forced" ]]; then
-            printf "\n"
-            read -s -p "$1 (default: empty) -> " passRes1
-        elif [[ $2 = "forced" ]]; then
-            printf "\n"
-            read -s -p "$1 (required) -> " passRes1
-        fi
 
-        # default value selector
-        if [[ $2 != "forced" ]] && [[ $passRes1 = "" ]]; then
-            passOut=""
-            passLoop="false"
-        elif [[ $2 != "forced" ]] && [[ $passRes1 != "" ]]; then
-            printf "\n"
-            read -s -p "repeat $1 -> " passRes2
-            if [[ $passRes1 = $passRes2 ]]; then
-                passOut=$pass1
-                passLoop="false"
-            elif [[ $passRes1 != $passRes2 ]]; then
-                printf "\n$1 not match"
-            else
-                printf "\nundefined error"
-            return 3
-            fi
-        elif [[ $2 = "forced" ]] && [[ $passRes1 = "" ]]; then
-            printf "\n$1 cannot be empty"
-        else
-            printf "\nundefined error"
-            return 3
-        fi
-    done
-}
-
-function getUserData() {
-    printf "\ngettingusers..."
-    eval users=$(eval getent passwd {$(awk '/^UID_MIN/ {print $2}' /etc/login.defs)..$(awk '/^UID_MAX/ {print $2}' /etc/login.defs)} | cut -d':' -f1,6)
-    echo $(eval getent passwd {$(awk '/^UID_MIN/ {print $2}' /etc/login.defs)..$(awk '/^UID_MAX/ {print $2}' /etc/login.defs)} | cut -d':' -f1,6)
-    printf "\n$users"
-    return
-}
-# entry point: menu and installation options
-function main {
-    printf "\nUbuntu Web Server Initialize v1.0"
-    printf "\nA utility script for configuring ubuntu instances for web server development and deployment"
-    printf "\nNote: This script is intended for use with fresh installations.\nUse of this script on pre-configured instances is strongly discouraged."
-
-    # 1. update
-    printf "\nscript will perform update on packages\noption 1 will run \`dist-upgrade\` and install latest package dependencies"
-    printf "\noption 2 will run \`upgrade\` without affecting dependencies"
-    varPrompt "2" "\n1: dist-upgrade\n2: upgrade"
-    if [[ $varOut -eq 1 ]]; then
-        sudo apt -y dist-upgrade
-    elif [[ $varOut -eq 2 ]]; then
-        # sudo apt -y upgrade
-        printf "\nskipping"
-    else
-        printf "\nunknown function output"
-        return 2
-    fi
-    # sudo apt update -y
-
-    # 2. SSH keys
-    # select which user to install key to
-    printf "\nretrieving system accounts"
-    printf "\n"
-
-    tmp=$(mktemp /tmp/usrData.XXXXXX)
-    printf "\nTMP THEN: $tmp CONTENTS: $(cat $tmp)"
-    (eval getent passwd {$(awk '/^UID_MIN/ {print $2}' /etc/login.defs)..$(awk '/^UID_MAX/ {print $2}' /etc/login.defs)} | cut -d':' -f1,6 > $tmp) & pid=$!
-    local sp="—\|/" i=0
-    while kill -0 $pid 2> /dev/null; do
-        i=$(( (i+1) %4 ))
-        printf "\rplease wait ${sp:$i:1}"
-        sleep .1
-    done
-    printf "\nTMP NOW: $tmp CONTENTS: $(cat $tmp)"
-
-    if userData=$(cat $tmp); then
-        rm "$tmp"
-    fi
-    if [[ -f $tmp ]]; then echo "\nTMP EXISTS"; elif [[ ! -f $tmp ]]; then echo "\nTMP DOES NOT EXIST"; fi
-
-
-
-
-    printf "\nuserData: $userData"
-    local userName=$(grep -Po "^[_a-z][-\w_]*(?!:\/(?>[-\w_\/]*|[^\S\r\n]*)*[^\/]?$)?" <<< $userData)
-    local userDir=$(grep -Po "^[_a-z][-\w_]*:\K\/(?>[-\w_\/]*|[^\S\r\n]*)*[^\/]?$" <<< $userData)
-    printf "\nuserName: $userName"
-    printf "\nuserDir: $userDir"
-
+function continuePrompt () {
     printf "\n"
     read -p "Press enter to continue"
-    # create varPrompt text that assigns a number to each user
+    printf "\033[2K\033[1A                       "
+}
 
-    # get result of varPrompt then assign currentUser to lsUsers[<index of user directory>] from user input
+# 1: Array name, 2: Label mode (empty=unlabelled, 1=numbered)
+function dispList () {
+    # declarations
+    local -n arr=$1
+    local arrLen=${#arr[@]} bar i l=-1 n
 
-    # check if .ssh directory exists
-    printf "user: $USER"
-    if [[ $HOME != /home/$USER ]]; then usermod -d /home/$USER $USER; fi
-    if [[ ! -d $HOME/.ssh/ ]]; then mkdir $HOME/.ssh/; fi
-    # check if authorized_keys file exists
-    if [[ ! -d $HOME/.ssh/authorized_keys ]]; then touch $HOME/.ssh/authorized_keys; fi
-    # check for folder ownership
-    if [[ $(stat -c "%U" $HOME/.ssh/) != $USER ]]; then chown $USER: $HOME/.ssh; fi
-    # check for file ownership
-    if [[ $(stat -c "%U" $HOME/.ssh/authorized_keys) != $USER ]]; then chown $USER: $HOME/.ssh/authorized_keys; fi
-    # check for file permissions
-    if [[ $(stat -c %a $HOME/.ssh/) != "700" ]]; then chmod 700 $HOME/.ssh; fi
-    if [[ $(stat -c %a $HOME/.ssh/authorized_keys) != "644" ]]; then chmod 644 $HOME/.ssh/authorized_keys; fi
-
-    if [[ -s /.ssh/autohrized_keys ]]; then
-        printf "\nssh \`authorized_keys\` file is empty"
-    elif [[ ! -s /.ssh/autohrized_keys ]]; then
-        printf "\n\`authorized_keys\` contains the following principals:"
-        local principals=$(grep -Po "[a-z,A-Z,0-9\.\-]{2,}\@[a-z,A-Z,0-9\.\-]{2,}" $HOME/.ssh/authorized_keys)
-        # make an automatically resizing gui based on list contents and their length
-        local l=-1
-        for x in ${principals[@]}; do
-            if [[ ${#x} -gt $l ]]; then
-                l=${#x}
-            fi
-        done
-        local i=1 bar
-        until [[ i -gt $l ]]; do
-            bar="$bar="
-            ((i++))
-        done
-        printf "\n$bar"
-        for x in ${principals[@]}; do
-            printf "\n${x}"
-        done
-        printf "\n$bar"
+    # get longest string length
+    for i in ${!arr[@]}; do
+        if [[ ${#arr[$i]} -gt $l ]]; then
+            l=${#arr[$i]}
+        fi
+    done
+    # compensate l length according to label mode
+    if [[ $2 -eq 1 ]]; then
+        ((l+= ${#arrLen} + 2))
     fi
-        printf "\nit is strongly recommended to inject ssh keys for this instance if not already"
-        ynPrompt "inject SSH key?"
-    if [[ $ynOut = "true" ]]; then
-        stringPrompt "public key" ""
-        publicKey=$stringOut
-        echo $publicKey >> $HOME/.ssh/authorized_keys
-    elif [[ $ynOut = "false" ]]; then
-        printf "\nskipping ssh key injection"
-    else
-        printf "\nunknown function output"
-        return 2
-    fi
-    printf "\n"
-    
+    # generate bar string
+    until [[ ${#bar} -eq $l ]]; do
+        bar+="="
+    done
 
-    # installation functions
+    # display list
+    printf "\n$bar"
+    # unnumbered list
+    if [[ -z $2 || $2 = "" ]]; then
+        for i in ${!arr[@]}; do
+            # display array element
+            printf "\n${arr[$i]}"
+        done
+    # numbered list
+    elif [[ $2 -eq 1 ]]; then
+        for i in ${!arr[@]}; do
+            # # offset zero-index to start list at 1 with n placeholder for list number
+            n="$(($i + 1)):"
+            # compare n with longest number length
+            until [[ ${#n} -gt ${#arrLen} ]]; do
+                # add whitespace
+                n+=" "
+            done
+            # display array element
+            printf "\n$n ${arr[$i]}"
+        done
+    fi
+    printf "\n$bar"
+    return
+}
+
+# 1: Output array, # 2: List array 1, #3: List array 2
+function alignList () {
+    # declarations
+    local -n outArr=$1 inArr1=$2 inArr2=$3
+    local i l=-1 str tmpArr
+
+    # get longest string length
+    for i in ${!inArr1[@]}; do
+        if [[ ${#inArr1[$i]} -gt $l ]]; then
+            l=${#inArr1[$i]}
+        fi
+    done
+
+    # compare string with length then add whitespace
+    for i in ${!inArr1[@]}; do
+        str=${inArr1[$i]}
+        until [[ ${#str} -eq $l ]]; do
+            str+=" "
+        done
+        tmpArr+=("$str |")
+    done
+
+    # append second array if exists
+    if [[ -n $inArr2 || ${#inArr2[@]} -ne 0 || $inArr2 != ""  ]]; then
+        for i in ${!tmpArr[@]}; do
+            outArr+=("${tmpArr[$i]} ${inArr2[$i]}")
+        done
+    elif [[ -z $inArr2 || ${#inArr2[@]} -eq 0 || $inArr2 = ""  ]]; then
+        outArr=(${tmpArr[@]})
+    fi 
+}
+
+
+
+# ENTRY POINT
+function main () {
+    {   # Menu
+        printf "================================="
+        printf "\nUbuntu Web Server Initialize v1.0"
+        printf "\n================================="
+        printf "\nA utility script for configuring ubuntu instances for web server development and deployment"
+        printf "\nNote: This script is intended for use with fresh installations.\nUse of this script on pre-configured instances is strongly discouraged."
+        printf "\n"
+    }
+    {   # 1. Update
+        printf "\nscript will perform update on packages:"
+        varPrompt "2" "\n1: dist-upgrade will install latest package dependencies\n2: upgrade is recommended for mission-critical environments"
+        if [[ $varOut -eq 1 ]]; then
+            sudo apt -y dist-upgrade
+        elif [[ $varOut -eq 2 ]]; then
+            # sudo apt -y upgrade
+            printf "\nskipping"
+        else
+            printf "\nunknown function output"
+            return 2
+        fi
+        printf "\n"
+        # sudo apt update -y
+    }
+    {   # 2. SSH keys
+        if ynPrompt "Inject SSH Key?" && [[ $? -ne 2 ]]; then
+            printf "\nretrieving system accounts"
+            printf "\n"
+            {   # get userData
+                local tmp=$(mktemp /tmp/usrData.XXXXXX)
+                (eval getent passwd {$(awk '/^UID_MIN/ {print $2}' /etc/login.defs)..$(awk '/^UID_MAX/ {print $2}' /etc/login.defs)} | cut -d':' -f1,6 > $tmp) & pid=$!
+                local sp="—\|/" i=0
+                # spinner
+                while kill -0 $pid 2> /dev/null; do
+                    i=$(( (i+1) %4 ))
+                    printf "\rplease wait ${sp:$i:1}"
+                    sleep .1
+                done
+                printf "\r             "
+                if userData=$(cat $tmp); then
+                    rm "$tmp"
+                fi
+                # select which user to install key to
+                local userNames=($(grep -Po "^[_a-z][-\w_]*(?!:\/(?>[-\w_\/]*|[^\S\r\n]*)*[^\/]?$)?" <<< $userData))
+                local userDirs=($(grep -Po "^[_a-z][-\w_]*:\K\/(?>[-\w_\/]*|[^\S\r\n]*)*[^\/]?$" <<< $userData))
+                alignList listUserNamesDirs userNames userDirs
+                varPrompt ${#userNames[@]} "\nplease select a user$(dispList listUserNamesDirs 1)"
+                # define selectedUser
+                local selectedUserDir=${userDirs[(($varOut - 1))]} selectedUserName=${userNames[(($varOut - 1))]}
+                printf "\nselected: $varOut=$selectedUserDir"
+                printf "\n"
+
+                # check if user directory is normal
+                if [[ $selectedUserDir != /home/$selectedUserName ]]; then
+                    printf "\nuser directory in /home not found"
+                    printf "\nchanging user directory..."
+                    continuePrompt
+                    usermod -d /home/$selectedUserName $selectedUserName
+                fi
+
+                # check if .ssh directory exists
+                if [[ ! -d $selectedUserDir/.ssh/ ]]; then
+                    printf "\n.ssh directory does not exist"
+                    printf "\ncreating .ssh directory"
+                    continuePrompt
+                    mkdir $selectedUserDir/.ssh/;
+                fi
+
+                # check if authorized_keys file exists
+                if [[ ! -f $selectedUserDir/.ssh/authorized_keys ]]; then
+                    printf "\nauthorized_keys file does not exist"
+                    printf "\ncreating authorized_keys file..."
+                    continuePrompt
+                    touch $selectedUserDir/.ssh/authorized_keys;
+                fi
+                # check for file-folder ownership
+                if [[ $(stat -c "%U" $selectedUserDir/.ssh/) != $selectedUserName ]]; then chown $selectedUserName: $selectedUserDir/.ssh; fi
+                if [[ $(stat -c "%U" $selectedUserDir/.ssh/authorized_keys) != $selectedUserName ]]; then chown $selectedUserName: $selectedUserDir/.ssh/authorized_keys; fi
+                # check for file-folder permissions
+                if [[ $(stat -c %a $selectedUserDir/.ssh/) != "700" ]]; then chmod 700 $selectedUserDir/.ssh; fi
+                if [[ $(stat -c %a $selectedUserDir/.ssh/authorized_keys) != "644" ]]; then chmod 644 $selectedUserDir/.ssh/authorized_keys; fi
+
+                # check contents of authorized_keys
+                if [[ -s $selectedUserDir/.ssh/autohrized_keys ]]; then
+                    printf "\nssh \`authorized_keys\` file is empty"
+                elif [[ ! -s $selectedUserDir/.ssh/autohrized_keys ]]; then
+                    printf "\nauthorized_keys contains the following principals:"
+                    local principals=($(grep -Po "[a-z,A-Z,0-9\.\-]{2,}\@[a-z,A-Z,0-9\.\-]{2,}" $selectedUserDir/.ssh/authorized_keys))
+                    dispList principals
+                    continuePrompt
+                fi 
+                # paste key prompt
+                printf "\n"
+                printf "Paste your certificate:\n"
+                IFS= read -d '' -n 1 publicKey   
+                while IFS= read -d '' -n 1 -t 2 c
+                do
+                    publicKey+=$c
+                done
+                printf "\nPublic key:\n$publicKey"
+                continuePrompt
+                
+                echo $publicKey >> $selectedUserDir/.ssh/authorized_keys
+            }
+        elif [[ $? -eq 1 || $? -eq 2 ]]; then
+            printf "\nskipping ssh key injection"
+        else
+            printf "undefined error"
+            return 1
+        fi
+    }
+
 
     # 2. install packages
+    for x in $packages[@]; do
+        case $x in
+            npm+node)
+                ;;
+            nodejs)
+                ;;
+            nginx)
+                ;;
+            dgraph)
+                ;;
+        esac
+    done
+    # npm nodejs nginx
 
     # 3. configure system services
 
-    # 4. configure nginx
+    # 4. configure system settings
+        # -max file watchers limit
+        # ssh timeout
 
-    # 5. configure system settings
+    # 5. optional configure nginx
 
-    # 6. configure network
+    # 6. optional configure network (if nginx template applied)
 
     # 7. print ip addresses
+
+    # 8. custom commands (dgraphstat, systemstat, nginxreload)
 
     
     return 0
